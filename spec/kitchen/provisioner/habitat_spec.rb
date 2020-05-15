@@ -331,13 +331,13 @@ describe Kitchen::Provisioner::Habitat do
     end
   end
 
-  describe "#get_artifact_name" do
+  describe "#fetch_artifact_name" do
     it "should resolve the target artifact name" do
       config[:artifact_name] = "example-package-0.1.0-20200406205105-x86_64-linux.hart"
-      get_artifact_name = provisioner.send(
-        :get_artifact_name
+      fetch_artifact_name = provisioner.send(
+        :fetch_artifact_name
       )
-      expect(get_artifact_name).to eq("/tmp/kitchen/results/example-package-0.1.0-20200406205105-x86_64-linux.hart")
+      expect(fetch_artifact_name).to eq("/tmp/kitchen/results/example-package-0.1.0-20200406205105-x86_64-linux.hart")
     end
   end
 
