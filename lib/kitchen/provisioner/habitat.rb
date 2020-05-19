@@ -121,7 +121,7 @@ module Kitchen
         # TODO: This isn't waiting for the service to come up... should we wait? If so, how long?
 
         # This little bit figures out what package should be loaded
-        if config[:install_latest_artifact] || !config[:artifact_name].nil?
+        if config[:install_latest_artifact] || !config[:artifact_name].nil? || !config[:build_from_source]
           target_pkg = get_artifact_name
           target_ident = "#{config[:package_origin]}/#{config[:package_name]}"
           # TODO: This is a workaround for windows. The hart file sometimes gets copied to the
@@ -166,7 +166,7 @@ module Kitchen
           BASH
         end
 
-        if config[:build_from_source] || !config[:artifact_name].nil?
+        if config[:build_from_source] || !config[:artifact_name].nil? || !config[:install_latest_artifact]
           target_pkg = get_artifact_name
           target_ident = "#{config[:package_origin]}/#{config[:package_name]}"
           # TODO: This is a workaround for windows. The hart file sometimes gets copied to the
@@ -181,18 +181,25 @@ module Kitchen
             if (!($env:Path | Select-String "Habitat")) {
               $env:Path += ";C:\\ProgramData\\Habitat"
             }
-            hab origin key generate #{config[:package_origin]}
+            Set-Location #{sandbox_path}
             pwd
             ls
             hab pkg build
-            . ./results/last_build.ps1
-            hab pkg install ./results/$pkg_artifact
-            if (Test-Path -Path "$(hab pkg path #{target_ident})\\hooks\\run") {
-              hab svc load #{target_ident} #{service_options} --force
-              Do {
-                Start-Sleep -Seconds 1
-              } until( hab svc status | out-string -stream | select-string #{target_ident})
+            Test-Path -Path "#{sandbox_path}\\results\\last_build.ps1"
+            if ($?) {
+              Write-host 'Build successful, proceeding.'
             }
+          else {
+            Write-Error 'Build failed, did not proceed to upload' -ErrorAction stop
+          }
+          . .\\results\\last_build.ps1
+          hab pkg install .\\results\\$pkg_artifact
+          if (Test-Path -Path "$(hab pkg path #{target_ident})\\hooks\\run") {
+            hab svc load #{target_ident} #{service_options} --force
+            Do {
+              Start-Sleep -Seconds 1
+            } until( hab svc status | out-string -stream | select-string #{target_ident})
+          }
           PWSH
         else
           wrap_shell_code <<~BASH
@@ -201,6 +208,7 @@ module Kitchen
                 echo "Waiting 5 seconds for supervisor to finish loading"
                 sleep 5
               done
+            cd #{sandbox_path}
             sudo hab pkg build
             sudo hab pkg install #{target_pkg} --channel #{config[:channel]} --force
             if [ -f $(sudo hab pkg path #{target_ident})/hooks/run ]
@@ -320,7 +328,7 @@ module Kitchen
       def resolve_source_directory
         return config[:source_directory] unless config[:source_directory].nil?
 
-        source_in_current = File.join(config[:kitchen_root], "plan.*")
+        source_in_current = File.join(config[:kitchen_root], "./plan.*")
         source_in_parent = File.join(config[:kitchen_root], "./Habitat/plan.*")
         source_in_grandparent = File.join(config[:kitchen_root], "../Habitat/plan.*")
 
@@ -364,10 +372,8 @@ module Kitchen
         source_dir = config[:kitchen_root]
         return if source_dir.nil?
 
-        FileUtils.mkdir_p(File.join(sandbox_path, "#{config[:package_name]}"))
-        FileUtils.cp_r(
-          File.join(source_dir, config[:buld_from_source] ? latest_artifact_name : config[:artifact_name]),
-          File.join(sandbox_path, "#{config[:package_name]}/"),
+        FileUtils.cp_r("#{source_dir}/.", "#{sandbox_path}/",
+        preserve: true
         )
       end
 
