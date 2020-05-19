@@ -179,8 +179,8 @@ describe Kitchen::Provisioner::Habitat do
     #   #config[:kitchen_root] = "/tmp/kitchen"
     #   resolve_results_directory = provisioner.send(
     #     :resolve_results_directory
-    #   )
-    #   expect(linux_install_service).to eq("/tmp/kitchen/results")
+      #   )
+      #   expect(linux_install_service).to eq("/tmp/kitchen/results")
     end
     xit "returns the parent path if it includes the results folder" do
       #   #config[:kitchen_root] = "/tmp/kitchen"

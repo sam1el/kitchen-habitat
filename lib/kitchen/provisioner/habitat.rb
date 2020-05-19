@@ -36,6 +36,7 @@ module Kitchen
       default_config :hab_sup_ring, nil
 
       # hab-sup service options
+      default_config :build_from_source, false
       default_config :install_latest_artifact, false
       default_config :artifact_name, nil
       default_config :package_origin, "core"
@@ -49,6 +50,7 @@ module Kitchen
       # local stuffs to copy
       default_config :results_directory, nil
       default_config :config_directory, nil
+      default_config :source_directory, nil
       default_config :user_toml_name, "user.toml"
       default_config :override_package_config, false
 
@@ -101,6 +103,7 @@ module Kitchen
 
       def create_sandbox
         super
+        copy_source_to_sandbox
         copy_results_to_sandbox
         copy_user_toml_to_sandbox
         copy_package_config_from_override_to_sandbox
@@ -119,7 +122,7 @@ module Kitchen
 
         # This little bit figures out what package should be loaded
         if config[:install_latest_artifact] || !config[:artifact_name].nil?
-          target_pkg = fetch_artifact_name
+          target_pkg = get_artifact_name
           target_ident = "#{config[:package_origin]}/#{config[:package_name]}"
           # TODO: This is a workaround for windows. The hart file sometimes gets copied to the
           # %TEMP%\kitchen instead of %TEMP%\kitchen\results.
@@ -164,13 +167,10 @@ module Kitchen
         end
 
         if config[:build_from_source] || !config[:artifact_name].nil?
-          target_pkg = fetch_artifact_name
+          target_pkg = get_artifact_name
           target_ident = "#{config[:package_origin]}/#{config[:package_name]}"
           # TODO: This is a workaround for windows. The hart file sometimes gets copied to the
           # %TEMP%\kitchen instead of %TEMP%\kitchen\results.
-          if windows_os?
-            target_pkg = target_pkg.gsub("results/", "")
-          end
         else
           target_pkg = package_ident
           target_ident = package_ident
@@ -181,9 +181,12 @@ module Kitchen
             if (!($env:Path | Select-String "Habitat")) {
               $env:Path += ";C:\\ProgramData\\Habitat"
             }
-            hab pkg build .
+            hab origin key generate #{config[:package_origin]}
+            pwd
+            ls
+            hab pkg build
             . ./results/last_build.ps1
-            hab pkg install #{target_pkg} --channel #{config[:channel]} --force
+            hab pkg install ./results/$pkg_artifact
             if (Test-Path -Path "$(hab pkg path #{target_ident})\\hooks\\run") {
               hab svc load #{target_ident} #{service_options} --force
               Do {
@@ -198,7 +201,7 @@ module Kitchen
                 echo "Waiting 5 seconds for supervisor to finish loading"
                 sleep 5
               done
-            sudo hab pkg build .
+            sudo hab pkg build
             sudo hab pkg install #{target_pkg} --channel #{config[:channel]} --force
             if [ -f $(sudo hab pkg path #{target_ident})/hooks/run ]
               then
@@ -317,15 +320,15 @@ module Kitchen
       def resolve_source_directory
         return config[:source_directory] unless config[:source_directory].nil?
 
-        source_in_current = File.join(config[:kitchen_root], "./")
-        source_in_parent = File.join(config[:kitchen_root], "../")
-        source_in_grandparent = File.join(config[:kitchen_root], "../../")
+        source_in_current = File.join(config[:kitchen_root], "plan.*")
+        source_in_parent = File.join(config[:kitchen_root], "./Habitat/plan.*")
+        source_in_grandparent = File.join(config[:kitchen_root], "../Habitat/plan.*")
 
-        if Dir.exist?(source_in_current)
+        if File.exist?(source_in_current)
           source_in_current
-        elsif Dir.exist?(source_in_parent)
+        elsif File.exist?(source_in_parent)
           source_in_parent
-        elsif Dir.exist?(source_in_grandparent)
+        elsif File.exist?(source_in_grandparent)
           source_in_grandparent
         end
       end
@@ -358,14 +361,13 @@ module Kitchen
       def copy_source_to_sandbox
         return if config[:artifact_name].nil? && !config[:build_from_source]
 
-        source_dir = resolve_source_directory
+        source_dir = config[:kitchen_root]
         return if source_dir.nil?
 
-        FileUtils.mkdir_p(File.join(sandbox_path, config[:package_name]))
-        FileUtils.cp(
-          File.join(source_dir, config[:build_from_source]),
-          File.join(sandbox_path, "./"),
-          preserve: true
+        FileUtils.mkdir_p(File.join(sandbox_path, "#{config[:package_name]}"))
+        FileUtils.cp_r(
+          File.join(source_dir, config[:buld_from_source] ? latest_artifact_name : config[:artifact_name]),
+          File.join(sandbox_path, "#{config[:package_name]}/"),
         )
       end
 
@@ -387,13 +389,22 @@ module Kitchen
       end
 
       def latest_artifact_name
-        results_dir = resolve_results_directory
-        return if results_dir.nil?
-
         if config[:install_latest_artifact]
+          results_dir = resolve_results_directory
+          return if results_dir.nil?
+
           if config[:package_origin].nil? || config[:package_name].nil?
             raise UserError,
                 "You must specify a 'package_origin' and 'package_name' to use the 'install_latest_artifact' option"
+          end
+
+        elsif config[:build_from_source]
+          source_dir = resolve_source_directory
+          return if source_dir.nil?
+
+          if config[:package_origin].nil? || config[:package_name].nil?
+            raise UserError,
+                "You must specify a 'source_directory' to use the 'build_from_source' option"
           end
         end
 
@@ -445,8 +456,11 @@ module Kitchen
         @pkg_ident = ident
       end
 
-      def fetch_artifact_name
+      def get_artifact_name
         artifact_name = ""
+        if config[:build_from_source]
+          artifact_name = [:package_name]
+        end
         if config[:install_latest_artifact]
           artifact_name = latest_artifact_name
         elsif !config[:install_latest_artifact] && !config[:artifact_name].nil?
