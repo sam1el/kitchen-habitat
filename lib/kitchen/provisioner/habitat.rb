@@ -121,7 +121,7 @@ module Kitchen
         # TODO: This isn't waiting for the service to come up... should we wait? If so, how long?
 
         # This little bit figures out what package should be loaded
-        if config[:install_latest_artifact] || !config[:artifact_name].nil? || !config[:build_from_source]
+        if config[:install_latest_artifact] || !config[:artifact_name].nil? && !config[:build_from_source]
           target_pkg = get_artifact_name
           target_ident = "#{config[:package_origin]}/#{config[:package_name]}"
           # TODO: This is a workaround for windows. The hart file sometimes gets copied to the
@@ -166,7 +166,7 @@ module Kitchen
           BASH
         end
 
-        if config[:build_from_source] || !config[:artifact_name].nil? || !config[:install_latest_artifact]
+        if config[:build_from_source] || !config[:artifact_name].nil? && !config[:install_latest_artifact]
           target_pkg = get_artifact_name
           target_ident = "#{config[:package_origin]}/#{config[:package_name]}"
           # TODO: This is a workaround for windows. The hart file sometimes gets copied to the
@@ -181,19 +181,19 @@ module Kitchen
             if (!($env:Path | Select-String "Habitat")) {
               $env:Path += ";C:\\ProgramData\\Habitat"
             }
-            Set-Location #{sandbox_path}
+            Set-Location #{sandbox_path}/
             pwd
             ls
             hab pkg build
-            Test-Path -Path "#{sandbox_path}\\results\\last_build.ps1"
+            Test-Path -Path "#{sandbox_path}/results/last_build.ps1"
             if ($?) {
               Write-host 'Build successful, proceeding.'
             }
           else {
             Write-Error 'Build failed, did not proceed to upload' -ErrorAction stop
           }
-          . .\\results\\last_build.ps1
-          hab pkg install .\\results\\$pkg_artifact
+          . ./results/last_build.ps1
+          hab pkg install ./results/$pkg_artifact
           if (Test-Path -Path "$(hab pkg path #{target_ident})\\hooks\\run") {
             hab svc load #{target_ident} #{service_options} --force
             Do {
@@ -328,15 +328,15 @@ module Kitchen
       def resolve_source_directory
         return config[:source_directory] unless config[:source_directory].nil?
 
-        source_in_current = File.join(config[:kitchen_root], "./plan.*")
-        source_in_parent = File.join(config[:kitchen_root], "./Habitat/plan.*")
-        source_in_grandparent = File.join(config[:kitchen_root], "../Habitat/plan.*")
+        source_in_current = File.join(config[:kitchen_root], "plan.*")
+        source_in_parent = File.join(config[:kitchen_root], "../Habitat")
+        source_in_grandparent = File.join(config[:kitchen_root], "../../Habitat")
 
         if File.exist?(source_in_current)
           source_in_current
-        elsif File.exist?(source_in_parent)
+        elsif Dir.exist?(source_in_parent)
           source_in_parent
-        elsif File.exist?(source_in_grandparent)
+        elsif Dir.exist?(source_in_grandparent)
           source_in_grandparent
         end
       end
@@ -372,8 +372,11 @@ module Kitchen
         source_dir = config[:kitchen_root]
         return if source_dir.nil?
 
-        FileUtils.cp_r("#{source_dir}/.", "#{sandbox_path}/",
-        preserve: true
+        FileUtils.mkdir_p(File.join(sandbox_path, "Habitat"))
+        FileUtils.cp_r(
+          File.join("#{source_dir}/.", config[:build_from_source] ? latest_artifact_name : config[:artifact_name]),
+          File.join(sandbox_path, "Habitat"),
+          preserve: true
         )
       end
 
@@ -464,9 +467,6 @@ module Kitchen
 
       def get_artifact_name
         artifact_name = ""
-        if config[:build_from_source]
-          artifact_name = [:package_name]
-        end
         if config[:install_latest_artifact]
           artifact_name = latest_artifact_name
         elsif !config[:install_latest_artifact] && !config[:artifact_name].nil?
