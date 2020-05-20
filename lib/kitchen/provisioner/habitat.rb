@@ -167,13 +167,8 @@ module Kitchen
         end
 
         if config[:build_from_source] || !config[:artifact_name].nil? && !config[:install_latest_artifact]
-          target_pkg = get_artifact_name
-          target_ident = "#{config[:package_origin]}/#{config[:package_name]}"
-          # TODO: This is a workaround for windows. The hart file sometimes gets copied to the
-          # %TEMP%\kitchen instead of %TEMP%\kitchen\results.
-        else
-          target_pkg = package_ident
-          target_ident = package_ident
+          target_pkg = "$pkg_artifact"
+          target_ident = "pkg_ident"
         end
 
         if windows_os?
@@ -181,20 +176,14 @@ module Kitchen
             if (!($env:Path | Select-String "Habitat")) {
               $env:Path += ";C:\\ProgramData\\Habitat"
             }
-            Set-Location #{sandbox_path}/
+            Set-Locantion #{sandbox_path}/#{config[:package_name]}
             pwd
             ls
             hab pkg build
-            Test-Path -Path "#{sandbox_path}/results/last_build.ps1"
-            if ($?) {
-              Write-host 'Build successful, proceeding.'
-            }
-          else {
-            Write-Error 'Build failed, did not proceed to upload' -ErrorAction stop
-          }
-          . ./results/last_build.ps1
-          hab pkg install ./results/$pkg_artifact
-          if (Test-Path -Path "$(hab pkg path #{target_ident})\\hooks\\run") {
+            if (!(Test-Path -Path "#{sandbox_path}/#{config[:package_name]}/results/last_build.ps1")) {throw "Build Failed"}
+            . ./results/last_build.ps1
+            hab pkg install ./results/$pkg_artifact
+            if (Test-Path -Path "$(hab pkg path #{target_ident})\\hooks\\run") {
             hab svc load #{target_ident} #{service_options} --force
             Do {
               Start-Sleep -Seconds 1
@@ -208,8 +197,9 @@ module Kitchen
                 echo "Waiting 5 seconds for supervisor to finish loading"
                 sleep 5
               done
-            cd #{sandbox_path}
+            cd #{sandbox_path}/#{config[:package_name]}
             sudo hab pkg build
+            source results/last_build.env
             sudo hab pkg install #{target_pkg} --channel #{config[:channel]} --force
             if [ -f $(sudo hab pkg path #{target_ident})/hooks/run ]
               then
@@ -329,8 +319,8 @@ module Kitchen
         return config[:source_directory] unless config[:source_directory].nil?
 
         source_in_current = File.join(config[:kitchen_root], "plan.*")
-        source_in_parent = File.join(config[:kitchen_root], "../Habitat")
-        source_in_grandparent = File.join(config[:kitchen_root], "../../Habitat")
+        source_in_parent = File.join(config[:kitchen_root], "./Habitat")
+        source_in_grandparent = File.join(config[:kitchen_root], "../Habitat")
 
         if File.exist?(source_in_current)
           source_in_current
@@ -369,13 +359,11 @@ module Kitchen
       def copy_source_to_sandbox
         return if config[:artifact_name].nil? && !config[:build_from_source]
 
-        source_dir = config[:kitchen_root]
+        source_dir = resolve_source_directory
         return if source_dir.nil?
 
-        FileUtils.mkdir_p(File.join(sandbox_path, "Habitat"))
-        FileUtils.cp_r(
-          File.join("#{source_dir}/.", config[:build_from_source] ? latest_artifact_name : config[:artifact_name]),
-          File.join(sandbox_path, "Habitat"),
+        FileUtils.mkdir_p "#{sandbox_path}/#{config[:package_name]}"
+        FileUtils.cp_r("#{source_dir}/.", "#{sandbox_path}/#{config[:package_name]}",
           preserve: true
         )
       end
