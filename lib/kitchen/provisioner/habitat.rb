@@ -167,8 +167,8 @@ module Kitchen
         end
 
         if config[:build_from_source] || !config[:artifact_name].nil? && !config[:install_latest_artifact]
-          target_pkg = "$pkg_artifact"
-          target_ident = "pkg_ident"
+          target_pln = "."
+          target_ident = "#{config[:package_origin]}/#{config[:package_name]}"
         end
 
         if windows_os?
@@ -176,10 +176,9 @@ module Kitchen
             if (!($env:Path | Select-String "Habitat")) {
               $env:Path += ";C:\\ProgramData\\Habitat"
             }
-            Set-Locantion #{sandbox_path}/#{config[:package_name]}
             pwd
             ls
-            hab pkg build
+            hab pkg build #{target_pln}
             if (!(Test-Path -Path "#{sandbox_path}/#{config[:package_name]}/results/last_build.ps1")) {throw "Build Failed"}
             . ./results/last_build.ps1
             hab pkg install ./results/$pkg_artifact
@@ -197,7 +196,6 @@ module Kitchen
                 echo "Waiting 5 seconds for supervisor to finish loading"
                 sleep 5
               done
-            cd #{sandbox_path}/#{config[:package_name]}
             sudo hab pkg build
             source results/last_build.env
             sudo hab pkg install #{target_pkg} --channel #{config[:channel]} --force
