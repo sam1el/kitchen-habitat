@@ -167,7 +167,15 @@ module Kitchen
         end
 
         if config[:build_from_source] || !config[:artifact_name].nil? && !config[:install_latest_artifact]
-          target_pln = "."
+          target_plan = fetch_plan_name
+          target_ident = "#{config[:package_origin]}/#{config[:package_name]}"
+          # TODO: This is a workaround for windows. The hart file sometimes gets copied to the
+          # %TEMP%\kitchen instead of %TEMP%\kitchen\results.
+          if windows_os?
+            target_plan = target_plan.gsub("Habitat", "") unless File.exist?(target_plan)
+          end
+        else
+          target_plan = plan_ident
           target_ident = "#{config[:package_origin]}/#{config[:package_name]}"
         end
 
@@ -178,8 +186,8 @@ module Kitchen
             }
             pwd
             ls
-            hab pkg build #{target_pln}
-            if (!(Test-Path -Path "#{sandbox_path}/#{config[:package_name]}/results/last_build.ps1")) {throw "Build Failed"}
+            hab pkg build #{target_plan}
+            if (!(Test-Path -Path ./results/last_build.ps1)) {throw "Build Failed"}
             . ./results/last_build.ps1
             hab pkg install ./results/$pkg_artifact
             if (Test-Path -Path "$(hab pkg path #{target_ident})\\hooks\\run") {
@@ -196,7 +204,7 @@ module Kitchen
                 echo "Waiting 5 seconds for supervisor to finish loading"
                 sleep 5
               done
-            sudo hab pkg build
+            sudo hab pkg build .
             source results/last_build.env
             sudo hab pkg install #{target_pkg} --channel #{config[:channel]} --force
             if [ -f $(sudo hab pkg path #{target_ident})/hooks/run ]
@@ -316,16 +324,16 @@ module Kitchen
       def resolve_source_directory
         return config[:source_directory] unless config[:source_directory].nil?
 
-        source_in_current = File.join(config[:kitchen_root], "plan.*")
-        source_in_parent = File.join(config[:kitchen_root], "./Habitat")
+        source_in_current = File.join(config[:kitchen_root], "./*")
+        source_in_child = File.join(config[:kitchen_root], "./Habitat")
         source_in_grandparent = File.join(config[:kitchen_root], "../Habitat")
 
-        if File.exist?(source_in_current)
+        if Dir.empty?(source_in_current)
           source_in_current
+        elsif Dir.exist?(source_in_child)
+          source_in_child
         elsif Dir.exist?(source_in_parent)
           source_in_parent
-        elsif Dir.exist?(source_in_grandparent)
-          source_in_grandparent
         end
       end
 
@@ -355,16 +363,21 @@ module Kitchen
       end
 
       def copy_source_to_sandbox
-        return if config[:artifact_name].nil? && !config[:build_from_source]
+        return if config[:plan_name].nil? && !config[:build_from_source]
 
         source_dir = resolve_source_directory
         return if source_dir.nil?
 
-        FileUtils.mkdir_p "#{sandbox_path}/#{config[:package_name]}"
-        FileUtils.cp_r("#{source_dir}/.", "#{sandbox_path}/#{config[:package_name]}",
+        FileUtils.mkdir_p(File.join(sandbox_path, "Habitat"))
+        FileUtils.cp_r("#{source_dir}/.", "#{sandbox_path}/Habitat",
           preserve: true
         )
       end
+      #   FileUtils.mkdir_p "#{sandbox_path}/#{config[:package_name]}"
+      #   FileUtils.cp_r("#{source_dir}/.", "#{sandbox_path}/#{config[:package_name]}",
+      #     preserve: true
+      #   )
+      # end
 
       def full_user_toml_path
         File.join(File.join(config[:kitchen_root], config[:config_directory]), config[:user_toml_name])
@@ -383,6 +396,21 @@ module Kitchen
         FileUtils.cp(full_user_toml_path, sandbox_user_toml_path)
       end
 
+      def fetch_build_plan
+        if config[:build_from_source]
+          source_dir = resolve_source_directory
+          return if source_dir.nil?
+
+          if config[:source_directory].nil?
+            raise UserError,
+                "You must specify a 'source_directory' to use the 'build_from_source' option"
+          end
+        end
+
+        plan_path = Dir.glob(File.join(source_dir, "plan.*")).max_by { |f| File.mtime(f) }
+        File.basename(plan_path)
+      end
+
       def latest_artifact_name
         if config[:install_latest_artifact]
           results_dir = resolve_results_directory
@@ -391,15 +419,6 @@ module Kitchen
           if config[:package_origin].nil? || config[:package_name].nil?
             raise UserError,
                 "You must specify a 'package_origin' and 'package_name' to use the 'install_latest_artifact' option"
-          end
-
-        elsif config[:build_from_source]
-          source_dir = resolve_source_directory
-          return if source_dir.nil?
-
-          if config[:package_origin].nil? || config[:package_name].nil?
-            raise UserError,
-                "You must specify a 'source_directory' to use the 'build_from_source' option"
           end
         end
 
@@ -451,6 +470,15 @@ module Kitchen
         @pkg_ident = ident
       end
 
+      def plan_ident
+        if windows_os?
+        ident = "plan.ps1"
+        else
+        ident = "plan.sh"
+        end
+        @plan_ident = ident
+      end
+
       def get_artifact_name
         artifact_name = ""
         if config[:install_latest_artifact]
@@ -466,6 +494,19 @@ module Kitchen
         config[:package_version] = ident["version"]
         config[:package_release] = ident["release"]
         File.join(File.join(config[:root_path], "results"), artifact_name)
+      end
+
+      def fetch_plan_name
+        plan_name = ""
+        if config [:build_from_source]
+          plan_name = fetch_build_plan
+        elsif !config[:build_from_source] && !config[:plan_name].nil?
+          plan_name = config[:plan_name]
+        else
+          return
+        end
+        ident = plan_name
+        File.join(config[:root_path], "Habitat", plan_name)
       end
 
       def supervisor_options
