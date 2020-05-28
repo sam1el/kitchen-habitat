@@ -324,11 +324,11 @@ module Kitchen
       def resolve_source_directory
         return config[:source_directory] unless config[:source_directory].nil?
 
-        source_in_current = File.join(config[:kitchen_root], "./*")
+        source_in_current = File.join(config[:kitchen_root], "./plan.*")
         source_in_child = File.join(config[:kitchen_root], "./Habitat")
-        source_in_grandparent = File.join(config[:kitchen_root], "../Habitat")
+        source_in_parent = File.join(config[:kitchen_root], "../Habitat")
 
-        if Dir.empty?(source_in_current)
+        if File.exist?(source_in_current)
           source_in_current
         elsif Dir.exist?(source_in_child)
           source_in_child
